@@ -148,6 +148,130 @@ This module implements the core constraint generation logic:
     \end{equation}
 \end{enumerate}
 
+\section{SAT Modelling}
+
+This section explains how student preferences are transformed into a Boolean satisfiability problem. The conversion process encodes all constraints as Conjunctive Normal Form (CNF) clauses that can be solved by a SAT solver.
+
+\subsection{Variable Encoding}
+
+Each Boolean variable $x_{i,r,c}$ represents whether student $i$ is assigned to seat at row $r$ and column $c$:
+
+\begin{equation}
+x_{i,r,c} \equiv \begin{cases} 
+1 & \text{if student } i \text{ sits at position } (r,c) \\
+0 & \text{if student } i \text{ does not sit at position } (r,c)
+\end{cases}
+\end{equation}
+
+The total number of variables is $N \times R \times C = O(NRC)$, where $N$ is the number of students, $R$ is the number of rows, and $C$ is the number of columns. In the implementation, variables are encoded as integers using the formula:
+
+\begin{equation}
+\text{var} = (student\_id - 1) \times R \times C + (row - 1) \times C + col
+\end{equation}
+
+\subsection{Constraint Types and CNF Conversion}
+
+The student preferences are converted into five types of constraints, each expressed as CNF clauses:
+
+\subsubsection{Constraint 1: Each Seat Has Exactly One Student}
+
+For each seat position $(r,c)$, exactly one student must be assigned. This is enforced by:
+
+\begin{itemize}
+    \item \textbf{At least one student:} For each seat $(r,c)$, we require that at least one student is assigned:
+    \begin{equation}
+    (x_{1,r,c} \vee x_{2,r,c} \vee \ldots \vee x_{N,r,c}) = 1
+    \end{equation}
+    
+    \item \textbf{At most one student:} For each seat $(r,c)$ and each pair of distinct students $(i,j)$ where $i < j$, we add the clause:
+    \begin{equation}
+    \neg x_{i,r,c} \vee \neg x_{j,r,c} = 1
+    \end{equation}
+    This ensures that if student $i$ is at $(r,c)$, then student $j$ cannot be at the same position, and vice versa.
+\end{itemize}
+
+\textbf{Complexity:} $O(N^2RC) = O(R^3C^3)$ clauses (when $N \approx RC$)
+
+\subsubsection{Constraint 2: Each Student Has Exactly One Seat in Preferred Zone}
+
+Each student must be assigned to exactly one seat within their preferred zone:
+
+\begin{itemize}
+    \item \textbf{At least one seat in preferred zone:} For student $i$ with preferred seats \\
+    $\{(r_1,c_1), (r_2,c_2), \ldots, (r_k,c_k)\}$:
+    \begin{equation}
+    (x_{i,r_1,c_1} \vee x_{i,r_2,c_2} \vee \ldots \vee x_{i,r_k,c_k}) = 1
+    \end{equation}
+    
+    \item \textbf{At most one seat in preferred zone:} For each pair of preferred seats $(r_p,c_p)$ and $(r_q,c_q)$ where $p \neq q$:
+    \begin{equation}
+    \neg x_{i,r_p,c_p} \vee \neg x_{i,r_q,c_q} = 1
+    \end{equation}
+\end{itemize}
+
+\textbf{Complexity:} $O(N(RC)^2) = O(R^3C^3)$ clauses
+
+\subsubsection{Constraint 3: No Student in Unpreferred Zone}
+
+Students cannot be assigned to seats outside their preferred zone. For each student $i$ and each unpreferred seat $(r,c)$:
+
+\begin{equation}
+\neg x_{i,r,c} = 1
+\end{equation}
+
+This is equivalent to the unit clause $\neg x_{i,r,c}$, which directly forbids the assignment.
+
+\textbf{Complexity:} $O(NRC) = O(R^2C^2)$ clauses
+
+\subsubsection{Constraint 4: Wants to Sit With (Neighbor Preference)}
+
+If student $i$ wants to sit with student $j$, and student $i$ is assigned to position $(r,c)$ in their preferred zone, then student $j$ must be adjacent to $(r,c)$. The constraint is:
+
+\begin{equation}
+x_{i,r,c} \rightarrow (x_{j,r-1,c} \vee x_{j,r+1,c} \vee x_{j,r,c-1} \vee x_{j,r,c+1})
+\end{equation}
+
+Converting the implication to CNF using $a \rightarrow b \Leftrightarrow \neg a \vee b$:
+
+\begin{equation}
+\neg x_{i,r,c} \vee x_{j,r-1,c} \vee x_{j,r+1,c} \vee x_{j,r,c-1} \vee x_{j,r,c+1} = 1
+\end{equation}
+
+Note that boundary checks ensure only valid adjacent positions are included (e.g., $r-1 \geq 1$, $r+1 \leq R$, etc.).
+
+\textbf{Complexity:} $O(N^2RC) = O(R^3C^3)$ clauses
+
+\subsubsection{Constraint 5: Doesn't Want to Sit With (Neighbor Prohibition)}
+
+If student $i$ doesn't want to sit with student $j$, and student $i$ is at position $(r,c)$ in their preferred zone, then student $j$ cannot be adjacent. The constraint is:
+
+\begin{equation}
+x_{i,r,c} \rightarrow (\neg x_{j,r-1,c} \wedge \neg x_{j,r+1,c} \wedge \neg x_{j,r,c-1} \wedge \neg x_{j,r,c+1})
+\end{equation}
+
+Converting to CNF, this becomes four separate clauses (one for each adjacent position):
+
+\begin{align}
+\neg x_{i,r,c} \vee \neg x_{j,r-1,c} &= 1 \\
+\neg x_{i,r,c} \vee \neg x_{j,r+1,c} &= 1 \\
+\neg x_{i,r,c} \vee \neg x_{j,r,c-1} &= 1 \\
+\neg x_{i,r,c} \vee \neg x_{j,r,c+1} &= 1
+\end{align}
+
+Again, boundary checks ensure only valid positions are considered.
+
+\textbf{Complexity:} $O(N^2RC) = O(R^3C^3)$ clauses
+
+\subsection{Overall Complexity}
+
+The total number of clauses is dominated by the $O(R^3C^3)$ terms from constraints 1, 2, 4, and 5. The overall clause count is:
+
+\begin{equation}
+\text{\#Clauses} = O(R^3C^3)
+\end{equation}
+
+This cubic growth in clause count with respect to classroom dimensions explains the rapid increase in problem complexity observed in the experimental results (see Section~\ref{fig:clauses}).
+
 \newpage
 \section{Data Flow}
 
