@@ -1,0 +1,284 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,fit}
+\usepackage{adjustbox}
+
+\geometry{margin=1in}
+
+\title{Seat Arrangement Problem with SAT Solver}
+\author{b12901193 Chin-Yen, Pan}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+This project implements a seat arrangement problem solver using the MiniSat SAT solver. The problem involves assigning students to seats in a classroom while satisfying various constraints including preferred seating zones, desired neighbors, and prohibited neighbors. The solution converts the problem into a Conjunctive Normal Form (CNF) representation and uses MiniSat to find a valid assignment.
+
+\vspace{1.5em}
+The complete source code and documentation for this project are available on GitHub: \textcolor{blue}{\url{https://github.com/jasonpan0930/2025fall_EDA_project}}
+
+\section{Project Structure}
+
+The project directory contains the following files and their purposes:
+
+\subsection{Source Code Files}
+
+\begin{itemize}
+    \item \texttt{main.cpp} - Main program that orchestrates the entire workflow
+    \item \texttt{config.h} - Configuration file defining file names and global variables
+    \item \texttt{generate\_random\_seat.cpp} - Generates random seat configurations for testing
+    \item \texttt{generate\_student\_choice.h} - Generates test student choice data
+    \item \texttt{generate\_cnf.h} - Generates CNF file from student preferences
+    \item \texttt{decode\_seat.h} - Decodes MiniSat output into seat assignment table
+    \item \texttt{check.h} - Validates the solution against all constraints
+\end{itemize}
+
+\subsection{Data Files}
+
+\begin{itemize}
+    \item \texttt{student\_choice.txt} - Input file containing student preferences
+    \item \texttt{cnf.cnf} - CNF file generated for MiniSat
+    \item \texttt{result.out} - MiniSat solver output
+    \item \texttt{seat\_assignment.txt} - Final seat arrangement result
+    \item \texttt{answer.txt} - Reference answer for testing
+\end{itemize}
+
+\subsection{Documentation}
+
+\begin{itemize}
+    \item \texttt{README\_choice\_format.md} - Format specification for student choice input
+    \item \texttt{seats arrangement problem.pdf} - slide for problem description and methodology
+\end{itemize}
+
+\section{File Functionality}
+(To simplify the report, here I only mention important files with important parts)
+
+\subsection{main.cpp}
+
+The main program coordinates the entire solving process:
+\begin{enumerate}
+    \item Optionally generates student choice file (if user chooses 'y')
+    \item Calls \texttt{generate\_cnf()} to create the CNF file
+    \item Executes MiniSat solver on the CNF file
+    \item Decodes the solution using \texttt{decode\_seat()}
+    \item Validates the solution using \texttt{validate\_seating()}
+\end{enumerate}
+
+\subsection{generate\_student\_choice.h}
+
+This module generates test data for the seat arrangement problem. It is used to create realistic student preference files for testing and evaluation purposes.
+
+\textbf{Preference Generation Algorithm:}
+
+For each student $i$ (from 1 to $N$), the function generates three types of preferences:
+
+\begin{enumerate}
+    \item \textbf{Preferred Zone:} 
+    \begin{itemize}
+        \item Always includes the student's current seat position $(r, c)$
+        \item Randomly adds additional seat positions: generates $\frac{1}{3}$ to $\frac{2}{3}$ of the total grid size ($R \times C$) additional single-seat rectangles
+        \item Each additional seat is specified as a rectangle with identical start and end coordinates (single cell)
+        \item Output format: \texttt{r1 c1 r2 c2 ; r3 c3 r4 c4 ; ...}
+    \end{itemize}
+    
+    \item \textbf{Wants to Sit With:}
+    \begin{itemize}
+        \item Identifies all neighbors of student $i$ in the input arrangement (up to 4 adjacent seats: up, down, left, right)
+        \item For each neighbor, includes them in the "wants" list with probability $\frac{1}{4}$ (25\% chance)
+        \item Output format: space-separated list of student IDs, or \texttt{-} if empty
+    \end{itemize}
+    
+    \item \textbf{Doesn't Want to Sit With:}
+    \begin{itemize}
+        \item Collects all students who are \textit{not} neighbors of student $i$
+        \item Randomly shuffles this list
+        \item Selects 1 to $\lfloor\frac{\text{number of non-neighbors}}{10}\rfloor$ students randomly
+        \item Output format: space-separated list of student IDs, or \texttt{-} if empty
+    \end{itemize}
+\end{enumerate}
+
+
+\subsection{generate\_cnf.h}
+
+This module implements the core constraint generation logic:
+
+\textbf{Variable Encoding:}
+\begin{equation}
+\text{var} = (student\_id - 1) \times R \times C + (row - 1) \times C + col
+\end{equation}
+
+\textbf{Constraints Generated:}
+\begin{enumerate}
+    \item \textbf{Each seat has exactly one student:} For each seat $(r,c)$ and each pair of students $(i,j)$, adds clause $\neg x_{i,r,c} \vee \neg x_{j,r,c}$
+    
+    \item \textbf{Each student has exactly one seat in preferred zone:}
+    \begin{itemize}
+        \item At least one: $(x_{i,r_1,c_1} \vee x_{i,r_2,c_2} \vee \ldots)$ for all preferred seats
+        \item At most one: $\neg x_{i,r_1,c_1} \vee \neg x_{i,r_2,c_2}$ for each pair of preferred seats
+    \end{itemize}
+    
+    \item \textbf{No student in unpreferred zone:} $\neg x_{i,r,c}$ for all unpreferred seats
+    
+    \item \textbf{Wants to sit with:} If student $i$ wants to sit with $j$ at position $(r,c)$, then:
+    \begin{equation}
+    \neg x_{i,r,c} \vee x_{j,r-1,c} \vee x_{j,r+1,c} \vee x_{j,r,c-1} \vee x_{j,r,c+1}
+    \end{equation}
+    
+    \item \textbf{Doesn't want to sit with:} If student $i$ doesn't want to sit with $j$ at position $(r,c)$, then:
+    \begin{equation}
+    \neg x_{i,r,c} \vee \neg x_{j,r-1,c}, \quad \neg x_{i,r,c} \vee \neg x_{j,r+1,c}, \quad \ldots
+    \end{equation}
+\end{enumerate}
+
+\newpage
+\section{Data Flow}
+
+The system processes student preferences through a pipeline that converts the problem into CNF format, solves it using MiniSat, and validates the result. Figure~\ref{fig:dataflow} illustrates the complete data flow of the system.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{eda_data_flow.png}
+\caption{Data flow diagram of the seat arrangement system. The diagram illustrates the complete workflow from student choice generation through CNF conversion, SAT solving, decoding, and validation.}
+\label{fig:dataflow}
+\end{figure}
+
+\newpage
+\section{Experimental Results}
+
+Experiments were conducted with varying numbers of students and classroom dimensions. The following tables summarize the results:
+
+\subsection{Performance Metrics}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{experiment_data.png}
+\caption{Performance metrics for various problem sizes. The table shows the number of variables, clauses, and execution times for different configurations of students, rows, and columns.}
+\label{fig:performance}
+\end{figure}
+
+\subsection{Observations}
+
+\begin{enumerate}
+    \item \textbf{Problem Size Growth:} The number of variables grows as $O(N \times R \times C)$, and clauses grow approximately as $O(R^3 \times C^3)$ for the constraint types implemented. As illustrated in Figure~\ref{fig:clauses}, the number of clauses exhibits cubic growth with respect to the number of students, following the polynomial trendline $y = 0.6924x^3 - 5.2803x^2 + 2832.5x - 26524$. This confirms the theoretical complexity analysis showing that clause generation scales as $O(R^3C^3)$.
+    
+    \begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{number_of_clauses.png}
+    \caption{Growth of the number of clauses as a function of the number of students.}
+    \label{fig:clauses}
+    \end{figure}
+    
+    \item \textbf{CNF Generation Time:} The time to generate CNF files scales roughly linearly with the number of clauses, ranging from 0.1 seconds for small problems (25 students) to 83.88 seconds for large problems (500 students). Figure~\ref{fig:cnfgen} shows the relationship between CNF generation time and the number of clauses, demonstrating a clear positive correlation. The generation time increases proportionally with clause count, indicating that the CNF generation process is primarily I/O bound rather than computationally complex.
+    
+    \begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{cnf_gen_time__n_clauses.png}
+    \caption{CNF file generation time as a function of the number of clauses.}
+    \label{fig:cnfgen}
+    \end{figure}
+    
+    \item \textbf{Solver Performance:} MiniSat's total CPU time is dominated by simplification time, which accounts for 90-96\% of total time. The actual search time is relatively small (0-17.5 seconds), indicating that most constraints are resolved during preprocessing. Figure~\ref{fig:cputime} illustrates the CPU time scaling with the number of students, showing a rapid acceleration beyond 250 students. The exponential-like growth pattern reflects the increasing complexity of constraint satisfaction as problem size increases.
+    
+    \begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{cpu_time.png}
+    \caption{CPU time scaling with the number of students.}
+    \label{fig:cputime}
+    \end{figure}
+    
+    \item \textbf{Scalability:} The approach successfully handles problems up to 500 students in a 25×20 classroom (250,000 variables, 86.6 million clauses) within reasonable time (under 8 minutes total).
+\end{enumerate}
+
+\subsection{Example Test Case}
+
+A test case with 80 students in a 10×10 classroom was successfully solved:
+\begin{itemize}
+    \item The solver found a valid seat arrangement
+    \item All constraints were verified to be satisfied
+    \item Although the result is different from the source of generate\_student\_choice.h (random\_seat), it still satisfies the student\_choice.txt
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.4\textwidth}
+\centering
+\includegraphics[width=\textwidth]{random_seat.png}
+\caption{Random seat arrangement used as input for generating student preferences}
+\label{fig:random_seat}
+\end{minipage}
+\hspace{0.05\textwidth}
+\begin{minipage}{0.4\textwidth}
+\centering
+\includegraphics[width=\textwidth]{sol_seat.png}
+\caption{Solution found by MiniSat solver}
+\label{fig:sol_seat}
+\end{minipage}
+\end{figure}
+
+\section{Complexity Analysis}
+
+\subsection{Variable Count}
+The number of Boolean variables is:
+\begin{equation}
+\text{\#Variables} = N \times R \times C = O(NRC) = O(R^2C^2) \text{ (when } N \approx RC \text{)}
+\end{equation}
+
+\subsection{Clause Count}
+
+The clause count is dominated by:
+\begin{enumerate}
+    \item \textbf{Each seat has one student:} $O(N^2RC) = O(R^3C^3)$
+    \item \textbf{Each student in preferred zone:} $O(N(RC)^2) = O(R^3C^3)$
+    \item \textbf{Neighbor constraints:} $O(N^2RC) = O(R^3C^3)$
+\end{enumerate}
+
+Total clause count: $O(R^3C^3)$
+
+\section{Conclusion}
+
+\subsection{Conlusion}
+This project successfully demonstrates the application of SAT solving to the seat arrangement problem. Key achievements include:
+
+\begin{enumerate}
+    \item \textbf{Successful Implementation:} The system correctly models all constraints (preferred zones, desired neighbors, prohibited neighbors) as CNF clauses.
+    
+    \item \textbf{Effective Solving:} MiniSat efficiently solves problems with up to 500 students, finding valid solutions when they exist.
+    
+    \item \textbf{Verification:} The validation module ensures solution correctness by checking all constraints.
+    
+    \item \textbf{Scalability:} The approach handles realistic problem sizes (hundreds of students) within reasonable time constraints.
+    
+    \item \textbf{Modularity:} The codebase is well-structured with clear separation of concerns (CNF generation, solving, decoding, validation).
+\end{enumerate}
+
+\subsection{Limitations and Future Work}
+
+\begin{itemize}
+    \item The current implementation may struggle with very large instances (1000+ students) due to $O(N^3)$ clause growth
+    \item The constraint generation could be optimized to reduce redundant clauses
+    \item Additional constraints (e.g., gender balance, academic performance distribution) could be incorporated
+    \item Alternative SAT solvers or SMT solvers could be evaluated for comparison
+\end{itemize}
+
+The project provides a solid foundation for solving seat arrangement problems using constraint satisfaction techniques, demonstrating the power of SAT solvers for combinatorial optimization problems.
+
+\end{document}
+
